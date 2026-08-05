@@ -6,6 +6,7 @@
 # require は lib/gear.rb を触らず自 slot 内で完結させる。
 require_relative 'clock/seed'
 require_relative 'clock/tick'
+require 'zeolite'
 
 module Gear
   # ==================================================================
@@ -26,6 +27,9 @@ module Gear
   # ==================================================================
   class Clock
     ORIGIN_INDEX = 0 # まだ advance していない run の起点。最初の advance で 1 を返す。
+    RANDOM_TAG = :clock_random
+    RANDOM_PAYLOAD = Zeolite.schema(bound: :integer).named(:ClockRandomPayload)
+    RANDOM_RESULT = Zeolite.schema(value: :integer).named(:ClockRandomResult)
 
     attr_reader :seed
 

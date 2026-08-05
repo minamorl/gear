@@ -202,3 +202,4 @@ end
 # (require 行は lib/gear.rb を触らず自分の領分で完結させる)。
 require_relative 'port/shell'
 require_relative 'port/http'
+require_relative 'port/time'

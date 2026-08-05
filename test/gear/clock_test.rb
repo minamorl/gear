@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
-# Clock は darkcore/berylx/zeolite にも他 slot にも依存しない純粋な時計。
+# Clock は darkcore/berylx や他 slot に依存しない純粋な時計。
+# 予約乱数効果の境界形だけは zeolite schema で宣言する。
 # それを担保するため 'gear' 全体ではなく clock だけを読み込む。
 require 'gear/clock'
 

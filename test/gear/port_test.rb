@@ -20,6 +20,7 @@ class GearPortTest < Minitest::Test
   Port  = Gear::Port
   Shell = Gear::Port::Shell::ADAPTER
   Http  = Gear::Port::Http::ADAPTER
+  TimeNow = Gear::Port::TimeNow::ADAPTER
 
   # ---- Effect は実行前のデータ ----------------------------------
   def test_effect_is_unexecuted_and_inspectable
@@ -140,6 +141,9 @@ class GearPortTest < Minitest::Test
     assert_equal :http, Port.for_tag(:http_request).name
     assert_same Shell, Port.adapter(:shell)
     assert_includes Port.registry.tags, :shell_run
+    assert_equal :time, Port.for_tag(:time_now).name
+    assert_same TimeNow, Port.adapter(:time)
+    refute_includes Port.registry.tags, Gear::Clock::RANDOM_TAG
   end
 
   # registry から tag で発見して Effect を作れる (発見 → 生成)。
@@ -155,6 +159,16 @@ class GearPortTest < Minitest::Test
 
     assert_includes handlers.keys, :shell_run
     assert_includes handlers.keys, :http_request
+    assert_includes handlers.keys, :time_now
+  end
+
+  def test_time_now_result_is_typed_and_json_serializable
+    eff = TimeNow.effect(:time_now, {})
+    res = ::Time.stub(:now, ::Time.at(42.5)) { Darkcore.run(eff, TimeNow.real_handlers) }
+
+    assert_instance_of Gear::Port::TimeNow::RESULT.data_class, res
+    assert_in_delta 42.5, res.epoch_seconds
+    assert_equal({ 'epoch_seconds' => 42.5 }, JSON.parse(JSON.generate(res.to_h)))
   end
 
   # 未登録 tag は検査可能な例外。

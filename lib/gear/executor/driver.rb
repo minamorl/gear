@@ -82,7 +82,7 @@ module Gear
       # 登録された全 tag を「gate を通す handler」に差し替える。Task 本体からの
       # perform はこの gate 済み handler にしか届かない (admission.no_bypass)。
       def gated_effects
-        @registry.tags.to_h do |tag|
+        (@registry.tags + [Clock::RANDOM_TAG]).to_h do |tag|
           [tag, ->(payload) { gate(tag, payload) }]
         end
       end
@@ -100,31 +100,50 @@ module Gear
 
         return deny(tick, tag, payload, verdict) if verdict.denied?
 
-        value, recorded = obtain(tag, payload)
-        record_effect(tick, tag, payload, recorded, verdict)
+        value, recorded, external = obtain(tick, tag, payload)
+        record_effect(tick, tag, payload, recorded, verdict, external: external)
         @processed += 1
         value
       end
 
       # Admitted。記録済み境界の内側なら読み戻し (再実行しない)、外なら実走する。
       # 返り値は [Task へ渡す型付き値, journal に積む素データ]。
-      def obtain(tag, payload)
+      def obtain(tick, tag, payload)
+        return obtain_random(tick, payload) if tag == Clock::RANDOM_TAG
+
         if @cursor < @recorded.size
           entry = @recorded[@cursor]
           @cursor += 1
           recorded = entry.payload['result']
-          [restore(tag, recorded), recorded] # 外界は叩かない (records_external_results)
+          [restore(tag, recorded), recorded, true] # 外界は叩かない (records_external_results)
         else
           value = @real.fetch(tag).call(payload) # ここが唯一の実外界呼び出し
-          [value, Port.normalize(value.to_h)]
+          [value, Port.normalize(value.to_h), true]
         end
       end
 
+      # seed と tick だけから導き、replay cursor と port_result には触れない。
+      def obtain_random(tick, payload)
+        checked = Clock::RANDOM_PAYLOAD.load(payload)
+        unless checked.ok?
+          raise Port::InvalidPayload,
+                "clock##{Clock::RANDOM_TAG} payload 不正: #{checked.violations.join('; ')}"
+        end
+
+        bound = checked.value.bound
+        raise Port::InvalidPayload, 'clock_random bound は正の Integer にする' unless bound.positive?
+
+        raw = { 'value' => @clock.rng_for(tick).rand(bound) }
+        [Clock::RANDOM_RESULT.load(raw).value, raw, false]
+      end
+
       # 実走の一歩を journal に綴じる: 外界結果 (port_result) と receipt を積む。
-      def record_effect(tick, tag, payload, recorded, verdict)
-        @out = @out.append(
-          Journal::Entry.at(tick.index, Journal::PORT_RESULT, 'port' => tag.to_s, 'result' => recorded)
-        )
+      def record_effect(tick, tag, payload, recorded, verdict, external:)
+        if external
+          @out = @out.append(
+            Journal::Entry.at(tick.index, Journal::PORT_RESULT, 'port' => tag.to_s, 'result' => recorded)
+          )
+        end
         receipt = Receipt.issue(
           effect: { tag: tag, payload: payload },
           outcome: Receipt.ok(recorded),

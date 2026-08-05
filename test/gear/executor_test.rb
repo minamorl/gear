@@ -54,6 +54,18 @@ class GearExecutorTest < Minitest::Test
     probe_task(:double_a, :a, 2) >> probe_task(:double_b, :b, 3)
   end
 
+  def random_task(name, key, bound = 1_000_000)
+    Berylx::Task[name] do |lay, io|
+      res = io.perform(Gear::Clock::RANDOM_TAG, { 'bound' => bound })
+      lay.put(key, res.value)
+    end
+  end
+
+  def mixed_random_and_ports
+    random_task(:random_a, :random_a) >> probe_task(:probe_a, :probe_a, 2) >>
+      random_task(:random_b, :random_b) >> probe_task(:probe_b, :probe_b, 3)
+  end
+
   # ---- berylx の Task 合成をそのまま実行できる (実 shell で end-to-end) ----
   def test_runs_berylx_task_composition_with_real_shell
     greet = Berylx::Task[:greet] do |lay, io|
@@ -175,5 +187,106 @@ class GearExecutorTest < Minitest::Test
     refute_predicate out, :suspended?
     assert_equal [3], calls, '記録済み境界の内側は再実行しない、外側だけ叩く'
     assert_equal({ a: 4, b: 6 }, out.result.focus.to_h)
+  end
+
+  # ---- seed 由来乱数は gate を通るが、外界結果としては記録しない ----
+  def test_random_effect_repeats_from_same_seed_without_recorded_results
+    program = random_task(:draw, :draw)
+
+    first = Executor.run(program, policy: allow, seed: 12_345)
+    second = Executor.run(program, policy: allow, seed: 12_345)
+
+    assert_empty first.journal.port_results, '決定論的乱数は外界結果として記録しない'
+    assert_empty second.journal.port_results
+    assert_equal first.result.focus.to_h[:draw], second.result.focus.to_h[:draw],
+                 '空の journal 同士でも一致は seed だけから生じる'
+  end
+
+  def test_random_effect_changes_with_seed_and_emits_receipt_with_value
+    program = random_task(:draw, :draw)
+    first = Executor.run(program, policy: allow, seed: 1)
+    second = Executor.run(program, policy: allow, seed: 2)
+
+    refute_equal first.result.focus.to_h[:draw], second.result.focus.to_h[:draw]
+    assert_equal 1, first.receipts.size
+    assert_equal first.result.focus.to_h[:draw], first.receipts.first.outcome['value']['value']
+    assert_equal 'clock_random', first.receipts.first.effect['tag']
+  end
+
+  def test_denied_random_effect_draws_nothing_and_records_denial
+    out = Executor.run(random_task(:draw, :draw), policy: deny, seed: 9)
+
+    assert_instance_of Berylx::Err, out.result
+    assert_empty out.receipts
+    assert_empty out.journal.port_results
+    denial = out.journal.find { |entry| entry.kind == :admission_denied }
+
+    refute_nil denial
+    assert_equal 'clock_random', denial.payload['tag']
+  end
+
+  def test_random_effect_does_not_shift_port_replay_cursor_when_resuming
+    partial = Executor.run(
+      mixed_random_and_ports, policy: allow, seed: 77,
+                              registry: registry_with_probe(partial_calls = []),
+                              max_effects: 3
+    )
+
+    assert_predicate partial, :suspended?
+    assert_equal [2], partial_calls
+    assert_equal 1, partial.journal.port_results.size
+
+    resumed = Executor.run(
+      mixed_random_and_ports, policy: allow, seed: 77,
+                              registry: registry_with_probe(resume_calls = []),
+                              journal: partial.journal
+    )
+    full = Executor.run(
+      mixed_random_and_ports, policy: allow, seed: 77,
+                              registry: registry_with_probe([])
+    )
+
+    assert_equal [3], resume_calls, '記録済み probe だけを読み戻し、次の probe は実走する'
+    assert_equal full.result.focus.to_h, resumed.result.focus.to_h
+    assert_equal full.receipts, resumed.receipts
+  end
+
+  # ---- 実時刻は外界 port として記録し、replay では読み戻す ----
+  def test_time_port_records_and_replays_without_reading_clock_again
+    program = Berylx::Task[:now] do |lay, io|
+      res = io.perform(Gear::Port::TimeNow::TAG, {})
+      lay.put(:now, res.epoch_seconds)
+    end
+
+    recorded = ::Time.stub(:now, ::Time.at(123.25)) do
+      Executor.run(program, policy: allow, seed: 6)
+    end
+    replayed = ::Time.stub(:now, -> { flunk 'replay で Time.now を呼んではならない' }) do
+      Executor.run(program, policy: allow, seed: 6, journal: recorded.journal)
+    end
+
+    entry = recorded.journal.port_results.fetch(0)
+
+    assert_equal 'time_now', entry.payload['port']
+    assert_in_delta 123.25, entry.payload['result']['epoch_seconds']
+    assert_equal recorded.result.focus.to_h[:now], replayed.result.focus.to_h[:now]
+    assert_equal 1, recorded.receipts.size
+    assert_predicate recorded.receipts.first, :grounded?
+    assert_in_delta 123.25, recorded.receipts.first.outcome['value']['epoch_seconds']
+  end
+
+  def test_denied_time_port_does_not_read_external_clock
+    program = Berylx::Task[:now] do |lay, io|
+      res = io.perform(Gear::Port::TimeNow::TAG, {})
+      lay.put(:now, res.epoch_seconds)
+    end
+
+    out = ::Time.stub(:now, -> { flunk 'deny の前に Time.now を呼んではならない' }) do
+      Executor.run(program, policy: deny, seed: 6)
+    end
+
+    assert_instance_of Berylx::Err, out.result
+    assert_equal(1, out.journal.count { |entry| entry.kind == :admission_denied })
+    assert_empty out.receipts
   end
 end
