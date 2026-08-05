@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ["3.2", "3.3", "3.4", "4.0"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: gear
+
+      # gear の Gemfile は兄弟 checkout を path 依存で束ねる。CI でも同じ形に並べる。
+      - uses: actions/checkout@v4
+        with:
+          repository: minamorl/berylx
+          path: berylx
+      - uses: actions/checkout@v4
+        with:
+          repository: minamorl/darkcore-ruby
+          path: darkcore-ruby
+      - uses: actions/checkout@v4
+        with:
+          repository: minamorl/zeolite
+          path: zeolite
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: gear
+
+      - run: bundle exec rake test
+        working-directory: gear
+      - run: bundle exec rubocop
+        working-directory: gear
