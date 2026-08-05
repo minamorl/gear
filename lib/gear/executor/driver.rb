@@ -50,7 +50,7 @@ module Gear
         @clock = clock
         @policy = policy
         @registry = registry
-        @real = registry.real_handlers        # tag => 型検証済みの実 handler
+        @real = registry.real_handlers # tag => 型検証済みの実 handler
         @recorded = replay_source.port_results # 追記順の外界結果 (読み戻し元)
         @cursor = 0                            # @recorded の読み戻し位置
         @max_effects = max_effects
@@ -82,8 +82,8 @@ module Gear
       # 登録された全 tag を「gate を通す handler」に差し替える。Task 本体からの
       # perform はこの gate 済み handler にしか届かない (admission.no_bypass)。
       def gated_effects
-        @registry.tags.each_with_object({}) do |tag, map|
-          map[tag] = ->(payload) { gate(tag, payload) }
+        @registry.tags.to_h do |tag|
+          [tag, ->(payload) { gate(tag, payload) }]
         end
       end
 
@@ -148,7 +148,7 @@ module Gear
             'reason' => verdict.reason.to_s, 'by' => verdict.by.to_s
           )
         )
-        raise AdmissionDenied.new(verdict)
+        raise AdmissionDenied, verdict
       end
 
       # 記録済みの素データを、その tag の result schema で型付き値へ復元する。

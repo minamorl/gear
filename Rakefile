@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'rake/testtask'
+require 'rubocop/rake_task'
 
 Rake::TestTask.new(:test) do |t|
   t.libs << 'test' << 'lib'
@@ -8,4 +9,7 @@ Rake::TestTask.new(:test) do |t|
   t.warning = false
 end
 
-task default: :test
+RuboCop::RakeTask.new(:rubocop)
+
+task lint: :rubocop
+task default: %i[test rubocop]

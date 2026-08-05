@@ -17,10 +17,10 @@ module Gear
       GOLDEN = 0x9E37_79B9_7F4A_7C15 # splitmix64 の黄金比定数
 
       # 1 語を撹拌する splitmix64 の finalizer。
-      def self.mix(x)
-        x = ((x ^ (x >> 30)) * 0xBF58_476D_1CE4_E5B9) & MASK64
-        x = ((x ^ (x >> 27)) * 0x94D0_49BB_1331_11EB) & MASK64
-        (x ^ (x >> 31)) & MASK64
+      def self.mix(word)
+        word = ((word ^ (word >> 30)) * 0xBF58_476D_1CE4_E5B9) & MASK64
+        word = ((word ^ (word >> 27)) * 0x94D0_49BB_1331_11EB) & MASK64
+        (word ^ (word >> 31)) & MASK64
       end
 
       # run seed と tick index を独立に撹拌してから合流させる。

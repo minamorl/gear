@@ -54,9 +54,9 @@ class GearRoutineTest < Minitest::Test
     reg
   end
 
-  def probe_task(name, key, n)
+  def probe_task(name, key, number)
     Berylx::Task[name] do |lay, io|
-      res = io.perform(:probe, { 'n' => n })
+      res = io.perform(:probe, { 'n' => number })
       lay.put(key, res.doubled)
     end
   end
@@ -100,6 +100,7 @@ class GearRoutineTest < Minitest::Test
   # ---- 復元した Routine を再実行すると、元と同じ effect 列が起きる ----
   def test_replaying_a_restored_routine_reproduces_the_effect_sequence
     original = record(two_probes, registry: registry_with_probe(orig_calls = []))
+
     assert_equal [2, 3], orig_calls
 
     routine = Routine.from_journal(original.journal, name: :double_pair)
@@ -107,7 +108,7 @@ class GearRoutineTest < Minitest::Test
     # まっさらな registry + 空 journal で「実走」させる (replay ではなく再実行)。
     replay_calls = []
     replay = Executor.run(routine.to_task, policy: allow, seed: 99,
-                          registry: registry_with_probe(replay_calls))
+                                           registry: registry_with_probe(replay_calls))
 
     assert_equal [2, 3], replay_calls, '復元したルーチンが元と同じ順・同じ値で効果を踏む'
     assert_equal effect_seq(original.journal), effect_seq(replay.journal),
@@ -121,11 +122,12 @@ class GearRoutineTest < Minitest::Test
 
     calls = []
     denied = Executor.run(routine.to_task, policy: deny, seed: 1,
-                          registry: registry_with_probe(calls))
+                                           registry: registry_with_probe(calls))
 
     assert_empty calls, 'ルーチン化しても admission を迂回できない (routine.same_gate)'
     assert_instance_of Berylx::Err, denied.result, '拒否は結果封筒 Err として返る'
     denials = denied.journal.select { |e| e.kind == :admission_denied }
+
     assert_equal 1, denials.size, '拒否は journal に記録される'
     assert_empty denied.receipts, '実行していないので receipt は出ない'
   end
@@ -136,12 +138,12 @@ class GearRoutineTest < Minitest::Test
     routine = Routine.from_journal(out.journal, name: :double_pair)
 
     run = Executor.run(routine.to_task, policy: allow, seed: 1,
-                       registry: registry_with_probe([]))
+                                        registry: registry_with_probe([]))
 
     assert_equal 2, run.receipts.size, '実行された効果の数だけ receipt が出る'
     run.receipts.each do |r|
-      assert r.succeeded?
-      assert r.grounded?, 'receipt は「何が許可したか」を持つ'
+      assert_predicate r, :succeeded?
+      assert_predicate r, :grounded?, 'receipt は「何が許可したか」を持つ'
     end
     # 鎖になっている (receipt.chainable)。
     assert_nil run.receipts[0].predecessor
@@ -160,6 +162,7 @@ class GearRoutineTest < Minitest::Test
 
     calls = []
     Executor.run(second.to_task, policy: allow, seed: 1, registry: registry_with_probe(calls))
+
     assert_equal [3], calls, '切り出した部分だけが走る'
   end
 
@@ -183,11 +186,13 @@ class GearRoutineTest < Minitest::Test
 
     # payload の 'n' を引数 :num に持ち上げる。
     param = routine.parameterize(num: { key: 'n' })
+
     assert_equal %w[num], param.params, '穴の名前が必要引数として見える'
 
     # 別の値を渡すと、その値で外界を叩く。
     calls = []
     param.run(policy: allow, seed: 1, params: { num: 42 }, registry: registry_with_probe(calls))
+
     assert_equal [42], calls, '記録時の 2 ではなく渡した 42 で走る'
 
     # 引数を渡さなければ「穴が埋まっていない」と弾く (一度きり再生との違い)。
@@ -200,11 +205,13 @@ class GearRoutineTest < Minitest::Test
     routine = Routine.from_journal(out.journal, name: :double_pair)
 
     reloaded = Routine.load(routine.dump)
+
     assert_equal routine, reloaded, 'dump → load で同値に戻る'
 
     # 穴あきルーチンも round-trip する (穴は JSON でそのまま運べる)。
     param = routine.parameterize(num: { key: 'n', step: 0 })
     param_reloaded = Routine.load(param.dump)
+
     assert_equal param, param_reloaded
     assert_equal %w[num], param_reloaded.params, '復元後も引数が保たれる'
   end

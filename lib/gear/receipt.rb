@@ -6,7 +6,6 @@
 
 require 'digest'
 require 'json'
-require 'set'
 
 # ==================================================================
 # Gear::Receipt — 根拠の鎖。
@@ -67,7 +66,7 @@ module Gear
     end
 
     # 結果要約の組み立て子。outcome: に渡す用。
-    def self.ok(value = nil)  = { 'status' => 'ok',  'value'  => canonicalize(value) }
+    def self.ok(value = nil) = { 'status' => 'ok', 'value' => canonicalize(value) }
     def self.err(reason = nil) = { 'status' => 'err', 'reason' => canonicalize(reason) }
 
     # ----------------------------------------------------------------
@@ -82,7 +81,7 @@ module Gear
       cur  = predecessor
       while cur
         raise self.class::BrokenChain, "missing predecessor: #{cur}" unless idx.key?(cur)
-        raise self.class::BrokenChain, "cycle detected at: #{cur}"    if seen.include?(cur)
+        raise self.class::BrokenChain, "cycle detected at: #{cur}" if seen.include?(cur)
 
         seen << cur
         rec = idx[cur]
@@ -148,11 +147,11 @@ module Gear
     def self.from_h(hash)
       h = hash.transform_keys(&:to_sym)
       new(
-        id:          h[:id],
-        tick:        h[:tick],
-        effect:      h[:effect],
-        outcome:     h[:outcome],
-        grounds:     h[:grounds],
+        id: h[:id],
+        tick: h[:tick],
+        effect: h[:effect],
+        outcome: h[:outcome],
+        grounds: h[:grounds],
         predecessor: h[:predecessor]
       )
     end
@@ -163,7 +162,7 @@ module Gear
     def self.index(store)
       return store if store.is_a?(Hash)
 
-      store.each_with_object({}) { |r, h| h[r.id] = r }
+      store.to_h { |receipt| [receipt.id, receipt] }
     end
 
     # darkcore Effect / Hash / タグ値 を serializable な要約へ。
@@ -202,10 +201,10 @@ module Gear
     # (tick.no_ambient_random の精神)。キー順に依存しないよう安定化する。
     def self.derive_id(tick:, effect:, outcome:, grounds:, predecessor:)
       material = sort_keys(
-        'tick'        => tick,
-        'effect'      => effect,
-        'outcome'     => outcome,
-        'grounds'     => grounds,
+        'tick' => tick,
+        'effect' => effect,
+        'outcome' => outcome,
+        'grounds' => grounds,
         'predecessor' => predecessor
       )
       Digest::SHA256.hexdigest(JSON.generate(material))[0, 16]
@@ -221,7 +220,7 @@ module Gear
       when Array
         obj.map { |e| canonicalize(e) }
       when Symbol
-        obj.to_s
+        String(obj)
       when String, Integer, Float, true, false, nil
         obj
       else
@@ -233,7 +232,7 @@ module Gear
     def self.sort_keys(obj)
       case obj
       when Hash
-        obj.keys.sort.each_with_object({}) { |k, h| h[k] = sort_keys(obj[k]) }
+        obj.keys.sort.to_h { |key| [key, sort_keys(obj[key])] }
       when Array
         obj.map { |e| sort_keys(e) }
       else
@@ -246,6 +245,7 @@ module Gear
     # 壊れた鎖 (存在しない先行 / 循環) を辿ろうとしたときに上がる。
     # Data.define のブロック内で定義するとレキシカルスコープの都合で
     # Gear:: 直下に落ちてしまうため、クラスを開き直してここに固定する。
-    BrokenChain = Class.new(StandardError)
+    class BrokenChain < StandardError
+    end
   end
 end

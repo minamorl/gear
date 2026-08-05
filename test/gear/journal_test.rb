@@ -35,8 +35,8 @@ class GearJournalTest < Minitest::Test
       refute_respond_to log, m, "書き換え/削除 API (#{m}) を生やしてはいけない"
     end
     # entry は immutable な値。
-    assert log.to_a.first.frozen?
-    assert log.frozen?
+    assert_predicate log.to_a.first, :frozen?
+    assert_predicate log, :frozen?
   end
 
   # -- fold で現在状態を導く ----------------------------------------------
@@ -49,6 +49,7 @@ class GearJournalTest < Minitest::Test
                      ])
 
     sum = log.fold(0) { |acc, e| acc + e.payload['n'] }
+
     assert_equal 10, sum
   end
 
@@ -97,7 +98,7 @@ class GearJournalTest < Minitest::Test
 
     # 外界結果が PORT_RESULT として journal に載っている。
     assert_equal 2, first[:log].port_results.size
-    assert_equal %w[clock http], first[:log].port_results.map { |e| e.payload['port'] }
+    assert_equal(%w[clock http], first[:log].port_results.map { |e| e.payload['port'] })
 
     # --- 再生走行: 同じ journal + 同じ seed。外界は「触れたら失敗」にする。
     #     replay が block を呼ばない (= 外界を再実行しない) ことをこれで実測する。
@@ -152,6 +153,7 @@ class GearJournalTest < Minitest::Test
     assert_equal log.to_a, reloaded.to_a
     # 読み戻した journal からも同じ状態が畳み込める (replay の土台)。
     ticks = ->(acc, e) { acc + e.tick }
+
     assert_equal log.fold(0, &ticks), reloaded.fold(0, &ticks)
   end
 

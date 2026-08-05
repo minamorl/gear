@@ -48,8 +48,8 @@ class GearAdmissionTest < Minitest::Test
     admitted = Admission.judge(request, policy: Admission::Policy::AllowAll.new)
     denied   = Admission.judge(request, policy: Admission::Policy::DenyAll.new)
 
-    assert admitted.admitted?
-    assert denied.denied?
+    assert_predicate admitted, :admitted?
+    assert_predicate denied, :denied?
     assert_equal request, admitted.request
   end
 
@@ -58,8 +58,8 @@ class GearAdmissionTest < Minitest::Test
     verdict = Admission.judge(shell_request, policy: Admission::Policy::DenyAll.new)
 
     assert_instance_of Admission::Denied, verdict
-    assert verdict.denied?
-    refute verdict.admitted?
+    assert_predicate verdict, :denied?
+    refute_predicate verdict, :admitted?
     assert_equal '既定拒否スタンス', verdict.reason
     assert_equal :deny_all, verdict.by
   end
@@ -95,11 +95,11 @@ class GearAdmissionTest < Minitest::Test
     admitted = Admission.judge(request, policy: both_admit)
     denied   = Admission.judge(request, policy: one_denies)
 
-    assert admitted.admitted?
+    assert_predicate admitted, :admitted?
     # 両 policy の grounds が積まれている。
     assert_equal 2, admitted.grounds.length
 
-    assert denied.denied?
+    assert_predicate denied, :denied?
     # 根拠は実際に拒否した rule を指す (AllowAll ではなく TagAllowlist)。
     assert_equal :tag_allowlist, denied.by
   end
@@ -120,10 +120,10 @@ class GearAdmissionTest < Minitest::Test
     #     tag を変えても結果が変わらない = ドメイン判断が焼かれていない。
     http_request = Admission::Request.from_effect(Darkcore.op(:http, { url: 'x' }))
 
-    assert Admission.judge(shell_request, policy: Admission::Policy::AllowAll.new).admitted?
-    assert Admission.judge(http_request,  policy: Admission::Policy::AllowAll.new).admitted?
-    assert Admission.judge(shell_request, policy: Admission::Policy::DenyAll.new).denied?
-    assert Admission.judge(http_request,  policy: Admission::Policy::DenyAll.new).denied?
+    assert_predicate Admission.judge(shell_request, policy: Admission::Policy::AllowAll.new), :admitted?
+    assert_predicate Admission.judge(http_request,  policy: Admission::Policy::AllowAll.new), :admitted?
+    assert_predicate Admission.judge(shell_request, policy: Admission::Policy::DenyAll.new), :denied?
+    assert_predicate Admission.judge(http_request,  policy: Admission::Policy::DenyAll.new), :denied?
   end
 
   # judge_effect: Effect ノードを直接ゲートに通せる (実行前検査)。
@@ -132,7 +132,7 @@ class GearAdmissionTest < Minitest::Test
 
     verdict = Admission.judge_effect(effect, policy: TagAllowlist.new(:shell))
 
-    assert verdict.admitted?
+    assert_predicate verdict, :admitted?
     assert_equal :shell, verdict.request.tag
   end
 end

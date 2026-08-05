@@ -1,0 +1,60 @@
+plugins:
+  - rubocop-minitest
+
+AllCops:
+  NewCops: enable
+  TargetRubyVersion: 3.2
+  Exclude:
+    - vendor/**/*
+    - tmp/**/*
+
+Style/Documentation:
+  Enabled: false
+
+Naming/MethodName:
+  AllowedPatterns:
+    - \A[A-Z][A-Za-z0-9_]*\z
+
+Style/ArgumentsForwarding:
+  Enabled: false
+
+Naming/BlockForwarding:
+  Enabled: false
+
+Metrics/AbcSize:
+  Max: 25
+  Exclude:
+    - test/**/*
+
+Metrics/MethodLength:
+  Max: 20
+
+Metrics/BlockLength:
+  Exclude:
+    - test/**/*
+    - "*.gemspec"
+
+Metrics/ClassLength:
+  Exclude:
+    - test/**/*
+
+Metrics/ModuleLength:
+  Max: 140
+
+Metrics/CyclomaticComplexity:
+  Max: 9
+
+Metrics/PerceivedComplexity:
+  Max: 9
+
+Metrics/ParameterLists:
+  Max: 7
+
+Minitest/MultipleAssertions:
+  Exclude:
+    - test/**/*
+
+# Gear::Journal::Log#append is immutable and returns a new Log. Assignment is
+# required to preserve the append-only journal semantics.
+Style/RedundantSelfAssignment:
+  Enabled: false

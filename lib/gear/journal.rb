@@ -91,8 +91,8 @@ module Gear
       # 現在状態は畳み込みで導く (pin journal.state_is_fold)。Log 自身は
       # 畳み込んだ結果をキャッシュ (= shadow state) しない。同じ Log と同じ
       # 初期値・同じ reducer からは常に同じ状態が出る。
-      def fold(initial)
-        @entries.reduce(initial) { |state, entry| yield(state, entry) }
+      def fold(initial, &block)
+        @entries.reduce(initial, &block)
       end
 
       # 記録された外界結果だけを追記順に。
@@ -162,9 +162,9 @@ module Gear
 
     # entry 列を NDJSON テキストへ書き出す (1 entry = 1 行)。
     def dump(log)
-      log.to_a.map do |entry|
+      "#{log.to_a.map do |entry|
         JSON.generate('tick' => entry.tick, 'kind' => entry.kind.to_s, 'payload' => entry.payload)
-      end.join("\n") + "\n"
+      end.join("\n")}\n"
     end
 
     # NDJSON テキストを読み戻して Log を復元する。zeolite で 1 record ずつ

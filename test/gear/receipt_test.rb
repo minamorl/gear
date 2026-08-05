@@ -46,11 +46,11 @@ class GearReceiptTest < Minitest::Test
     assert_equal({ 'path' => '/tmp/x', 'bytes' => 3 }, r.effect['payload'])
 
     # 何が許可したか (grounds)
-    assert r.grounded?, 'grounds を持つべき'
+    assert_predicate r, :grounded?, 'grounds を持つべき'
     assert_equal 'fs.write.allow', r.grounds['policy']
 
     # 結果
-    assert r.succeeded?
+    assert_predicate r, :succeeded?
     assert_equal 'written', r.outcome['value']
   end
 
@@ -88,7 +88,8 @@ class GearReceiptTest < Minitest::Test
       tick: 7
     }
     a = Gear::Receipt.issue(**base)
-    b = Gear::Receipt.issue(**base.merge(tick: 8))
+    b = Gear::Receipt.issue(**base, tick: 8)
+
     refute_equal a.id, b.id, 'tick が違えば id も違う'
   end
 
@@ -107,8 +108,8 @@ class GearReceiptTest < Minitest::Test
     assert_equal [mid, root], leaf.ancestors(store)
     assert_equal [root], mid.ancestors(store)
     assert_empty root.ancestors(store)
-    assert root.root?
-    refute leaf.root?
+    assert_predicate root, :root?
+    refute_predicate leaf, :root?
 
     assert Gear::Receipt.chain_ok?(store), '健全な鎖'
   end
@@ -138,6 +139,7 @@ class GearReceiptTest < Minitest::Test
 
     refute Gear::Receipt.chain_ok?(store)
     cyclic = Gear::Receipt.audit(store)[:cyclic]
+
     assert_includes cyclic, a
     assert_includes cyclic, b
 
@@ -158,6 +160,7 @@ class GearReceiptTest < Minitest::Test
 
     # JSON 経由 (journal に載る前提の serializable 性)
     restored = Gear::Receipt.from_json(r.to_json)
+
     assert_equal r, restored
     assert_equal r.id, restored.id
     assert_equal r.grounds, restored.grounds
@@ -173,7 +176,7 @@ class GearReceiptTest < Minitest::Test
       tick: 3
     )
 
-    assert_equal true, r.grounds['allowed']
+    assert r.grounds['allowed']
     assert_equal 'fs.write.allow', r.grounds['policy']
     assert_equal ['within sandbox'], r.grounds['reasons']
   end

@@ -35,8 +35,8 @@ module Gear
 
       def self.from_h(hash)
         new(
-          tick:    hash['tick']    || hash[:tick],
-          tag:     (hash['tag']    || hash[:tag]).to_s,
+          tick: hash['tick'] || hash[:tick],
+          tag: (hash['tag'] || hash[:tag]).to_s,
           payload: hash['payload'] || hash[:payload]
         )
       end

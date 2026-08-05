@@ -26,10 +26,11 @@ class GearPortTest < Minitest::Test
     eff = Shell.effect(:shell_run, cmd: 'echo hi')
 
     assert_instance_of Darkcore::Effect, eff
-    refute eff.closed?, '外界 op はまだ閉じていない (継続を持つ)'
+    refute_predicate eff, :closed?, '外界 op はまだ閉じていない (継続を持つ)'
 
     # 走らせずに tag と payload を覗ける (pin port.effect_substrate)。
     state = Darkcore.step(eff)
+
     assert_instance_of Darkcore::Pending, state
     assert_equal :shell_run, state.tag
     assert_equal({ 'cmd' => 'echo hi' }, state.payload)
@@ -49,6 +50,7 @@ class GearPortTest < Minitest::Test
 
     # 圏R — 本物の外界。実際に echo が走る。
     real = Darkcore.run(eff, Shell.real_handlers)
+
     assert_equal 0, real.exit_status
     assert_equal "hi\n", real.stdout
 
@@ -59,6 +61,7 @@ class GearPortTest < Minitest::Test
       { 'exit_status' => 0, 'stdout' => "FAKE\n", 'stderr' => '' }
     end
     faked = Darkcore.run(eff, fake)
+
     assert_equal "FAKE\n", faked.stdout
     assert_equal [[:shell_run, { 'cmd' => 'echo hi' }]], calls, 'fake は payload を記録した'
 
@@ -67,6 +70,7 @@ class GearPortTest < Minitest::Test
       { 'exit_status' => 0, 'stdout' => '', 'stderr' => '' }
     end
     dried = Darkcore.run(eff, dry)
+
     assert_equal '', dried.stdout
 
     # 同一 Effect が三通りに解釈された。
@@ -78,6 +82,7 @@ class GearPortTest < Minitest::Test
   def test_shell_real_handler_runs_echo
     eff = Shell.effect(:shell_run, cmd: 'echo gear')
     res = Darkcore.run(eff, Shell.real_handlers)
+
     assert_equal "gear\n", res.stdout
     assert_equal 0, res.exit_status
   end
@@ -86,6 +91,7 @@ class GearPortTest < Minitest::Test
     # 破壊的でないコマンドだけ (false と、stderr へ 1 行)。
     eff = Shell.effect(:shell_run, cmd: 'echo boom 1>&2; false')
     res = Darkcore.run(eff, Shell.real_handlers)
+
     assert_equal 1, res.exit_status
     assert_equal "boom\n", res.stderr
     assert_equal '', res.stdout
@@ -110,6 +116,7 @@ class GearPortTest < Minitest::Test
 
     dumped = JSON.generate(res.to_h)
     round = JSON.parse(dumped)
+
     assert_equal({ 'exit_status' => 0, 'stdout' => "hi\n", 'stderr' => '' }, round)
   end
 
@@ -138,12 +145,14 @@ class GearPortTest < Minitest::Test
   # registry から tag で発見して Effect を作れる (発見 → 生成)。
   def test_registry_builds_effect_from_tag
     eff = Port.effect(:shell_run, cmd: 'echo hi')
+
     assert_equal :shell_run, Darkcore.step(eff).tag
   end
 
   # 全 adapter の real handler が一枚に畳まれる (単一 Effect 型)。
   def test_registry_merges_real_handlers
     handlers = Port.real_handlers
+
     assert_includes handlers.keys, :shell_run
     assert_includes handlers.keys, :http_request
   end
@@ -169,6 +178,7 @@ class GearPortTest < Minitest::Test
   def test_http_effect_is_pure_and_inspectable
     eff = Http.effect(:http_request, method: 'GET', url: 'http://example.test/')
     state = Darkcore.step(eff)
+
     assert_equal :http_request, state.tag
     assert_equal({ 'method' => 'GET', 'url' => 'http://example.test/' }, state.payload)
   end
@@ -179,6 +189,7 @@ class GearPortTest < Minitest::Test
       { 'status' => 200, 'headers' => { 'Content-Type' => 'text/plain' }, 'body' => 'ok' }
     end
     res = Darkcore.run(eff, fake)
+
     assert_instance_of Gear::Port::Http::RESULT.data_class, res
     assert_equal 200, res.status
     assert_equal 'ok', res.body

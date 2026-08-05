@@ -32,8 +32,8 @@ module Gear
       t2 = clock.advance
       t3 = clock.advance
 
-      assert t1 < t2
-      assert t2 < t3
+      assert_operator t1, :<, t2
+      assert_operator t2, :<, t3
       assert_equal [t1, t2, t3], [t3, t1, t2].sort
     end
 

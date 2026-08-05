@@ -105,7 +105,7 @@ module Gear
         checked = op.payload_schema.load(normalized)
         unless checked.ok?
           raise InvalidPayload,
-                "#{name}##{tag} payload 不正: #{checked.violations.map(&:to_s).join('; ')}"
+                "#{name}##{tag} payload 不正: #{checked.violations.join('; ')}"
         end
 
         # Effect に載せるのは正規化済みの素データ (journal 記録可能)。
@@ -124,7 +124,7 @@ module Gear
             checked = op.result_schema.load(Port.normalize(raw))
             unless checked.ok?
               raise InvalidResult,
-                    "#{name}##{op.tag} result 不正: #{checked.violations.map(&:to_s).join('; ')}"
+                    "#{name}##{op.tag} result 不正: #{checked.violations.join('; ')}"
             end
 
             checked.value
@@ -152,9 +152,7 @@ module Gear
       def register(adapter)
         adapter.tags.each do |tag|
           owner = @by_tag[tag]
-          if owner && owner.name != adapter.name
-            raise TagConflict, "tag #{tag.inspect} は既に #{owner.name} が所有"
-          end
+          raise TagConflict, "tag #{tag.inspect} は既に #{owner.name} が所有" if owner && owner.name != adapter.name
         end
         @by_name[adapter.name] = adapter
         adapter.tags.each { |tag| @by_tag[tag] = adapter }

@@ -32,9 +32,7 @@ module Gear
     def initialize(seed:)
       # seed は明示必須。既定値を暗黙生成すると ambient RNG に依存してしまうため、
       # Integer 以外は受け付けない (pin tick.no_ambient_random)。
-      unless seed.is_a?(Integer)
-        raise ArgumentError, "seed は Integer で明示する (暗黙乱数を混ぜないため): #{seed.inspect}"
-      end
+      raise ArgumentError, "seed は Integer で明示する (暗黙乱数を混ぜないため): #{seed.inspect}" unless seed.is_a?(Integer)
 
       @seed = seed
       @index = ORIGIN_INDEX
