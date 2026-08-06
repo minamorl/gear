@@ -59,4 +59,10 @@ module Gear
       { 'ports' => ports.map(&:to_s), 'programs' => programs.map(&:to_s), 'depth' => depth }
     end
   end
+
+  # program が自分へ渡された範囲を読むための予約キー。宣言を focus へ置くので
+  # program 側は lay[Gear::Kit::FOCUS_KEY].fetch で自分の範囲を知れる。
+  # Data.define のブロック内に書くと定数は Gear へ定義されてしまう (ブロックは
+  # 定数の定義スコープを変えない) ので、外へ出して Kit へ付ける。
+  Kit::FOCUS_KEY = :gear_kit
 end

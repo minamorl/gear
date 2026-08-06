@@ -91,16 +91,40 @@ module Gear
     #   registry    : 効果 tag を握る Port::Registry。既定はプロセス既定 registry。
     #   journal     : 再開元 / リプレイ元の journal。記録済み外界結果は読み戻す。
     #   max_effects : 何個目の効果の手前で中断するか。nil なら中断しない。
+    #   kit         : program へおろす権限セット (Gear::Kit)。渡すと「渡した範囲」が
+    #                 天井になり、宣言が focus へ載って program 自身から読める。
+    #                 nil なら従来どおり policy だけが判定する。
     def run(program, policy:, seed:, focus: {}, registry: Port.registry,
-            journal: Journal::Log.new, max_effects: nil)
+            journal: Journal::Log.new, max_effects: nil, kit: nil)
       Driver.new(
         clock: Clock.new(seed: seed),
-        policy: policy,
+        policy: capped_policy(policy, kit),
         registry: registry,
         replay_source: journal,
-        max_effects: max_effects
-      ).run(program, focus)
+        max_effects: max_effects,
+        kit: kit
+      ).run(program, focus_with_kit(focus, kit))
     end
+
+    # kit を渡したときは、渡した範囲が天井になる (policy はその内側で更に絞れる)。
+    # kit 無しなら policy だけ — 既定のスタンスを gear 本体へ焼かない
+    # (admission.policy_pluggable / no_hardcoded_domain)。
+    def capped_policy(policy, kit)
+      return policy if kit.nil?
+
+      Admission::Policy::All.new(Admission::Policy::ByKit.new(kit), policy)
+    end
+
+    # 渡された範囲を program が読めるように、宣言を focus へ置く。生オブジェクトでは
+    # なく JSON-safe な素データにする (journal.state_is_fold — 畳み込めない物を
+    # 状態に座らせない)。
+    def focus_with_kit(focus, kit)
+      return focus if kit.nil?
+      return focus.put(Kit::FOCUS_KEY, kit.to_h) if focus.respond_to?(:put)
+
+      focus.merge(Kit::FOCUS_KEY => kit.to_h)
+    end
+    private_class_method :capped_policy, :focus_with_kit
   end
 end
 

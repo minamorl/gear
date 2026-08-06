@@ -46,9 +46,10 @@ module Gear
     class Driver
       # replay_source : 記録済み外界結果の読み戻し元 (Journal::Log)。空なら全て実走。
       # max_effects   : 何個目の効果の手前で中断するか。nil なら中断しない。
-      def initialize(clock:, policy:, registry:, replay_source:, max_effects:)
+      def initialize(clock:, policy:, registry:, replay_source:, max_effects:, kit: nil)
         @clock = clock
         @policy = policy
+        @kit = kit # 子へ細めておろす元 (submit で使う)
         @registry = registry
         @real = registry.real_handlers # tag => 型検証済みの実 handler
         @replay = Replay.new(recorded: replay_source.port_results, registry: registry)

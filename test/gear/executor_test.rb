@@ -339,4 +339,41 @@ class GearExecutorTest < Minitest::Test
     assert_equal recorded.receipts, replayed.receipts
     assert_equal({ a: 4, b: 20 }, replayed.result.focus.to_h)
   end
+
+  # ---- Kit を渡すと program が自分の範囲を読め、渡していない port は呼べない ----
+  def test_kit_declaration_is_readable_from_the_program
+    seen = nil
+    program = Berylx::Task[:reads_kit] do |lay, io|
+      seen = lay[Gear::Kit::FOCUS_KEY].fetch
+      lay.put(:doubled, io.perform(:probe, { 'n' => 2 }).doubled)
+    end
+    out = Executor.run(program, policy: allow, seed: 1, registry: registry_with_probe([]),
+                                kit: Gear::Kit.of(ports: %i[probe]))
+
+    assert_equal({ 'ports' => %w[probe], 'programs' => [], 'depth' => 0 }, seen,
+                 'program は自分へ渡された範囲を素データで読める')
+    assert_equal 4, out.result.focus.to_h[:doubled]
+  end
+
+  def test_kit_caps_the_policy_even_when_the_policy_allows
+    out = Executor.run(probe_task(:capped, :a, 2), policy: allow, seed: 1,
+                                                   registry: registry_with_probe(calls = []),
+                                                   kit: Gear::Kit.of(ports: %i[something_else]))
+
+    assert_empty calls, '渡していない port は外界を叩かない (policy が許しても)'
+    assert_instance_of Berylx::Err, out.result, '拒否は結果封筒の Err として閉じる'
+    denied = out.journal.to_a.select { |e| e.kind == :admission_denied }
+
+    assert_equal 1, denied.size
+    assert_match(/渡されていない/, denied.first.payload['reason'])
+    assert_equal 'by_kit', denied.first.payload['by']
+  end
+
+  def test_without_a_kit_nothing_changes
+    out = Executor.run(probe_task(:plain, :a, 2), policy: allow, seed: 1,
+                                                  registry: registry_with_probe(calls = []))
+
+    assert_equal [2], calls
+    assert_equal 4, out.result.focus.to_h[:a]
+  end
 end

@@ -49,6 +49,9 @@ Metrics/PerceivedComplexity:
 
 Metrics/ParameterLists:
   Max: 7
+  # キーワード引数は順序を覚える必要が無いので、このコップの狙い (位置引数の
+  # 読みにくさ) に当たらない。Executor.run は走行の入力を全部名前付きで受ける。
+  CountKeywordArgs: false
 
 Minitest/MultipleAssertions:
   Exclude:

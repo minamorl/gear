@@ -35,6 +35,28 @@ module Gear
       end
 
       # ----------------------------------------------------------------
+      # Kit に載っている port だけを許すスタンス。Kit は「渡す物」としての宣言で、
+      # ここがその執行側 — 渡していない port は呼べない。tag を見るだけで
+      # ドメイン固有ルールを持たないので admission.no_hardcoded_domain は破らない。
+      # ----------------------------------------------------------------
+      class ByKit
+        def initialize(kit)
+          @kit = kit
+        end
+
+        def judge(request)
+          unless @kit.port?(request.tag)
+            return Verdict.deny(request, reason: "port #{request.tag} は渡されていない", by: :by_kit)
+          end
+
+          Verdict.admit(
+            request,
+            grounds: [Grant.new(policy: :by_kit, detail: "port #{request.tag} を渡している")]
+          )
+        end
+      end
+
+      # ----------------------------------------------------------------
       # AND 合成。全 policy が許可したときのみ許可し、1 つでも拒否したら
       # 全体が拒否 (拒否した policy の Denied をそのまま返すので、根拠は
       # 実際に拒否した rule を指す)。許可時は各 policy の grounds を積む。

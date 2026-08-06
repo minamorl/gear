@@ -80,4 +80,34 @@ class GearKitTest < Minitest::Test
     assert_equal full, Kit.from_h(hash)
     assert_equal full, Kit.from_h(JSON.parse(JSON.generate(hash))), 'JSON を往復しても同じ'
   end
+
+  # ---- Kit の執行側: 渡した port だけを許す ----
+  def by_kit(kit) = Gear::Admission::Policy::ByKit.new(kit)
+  def request(tag) = Gear::Admission::Request.new(tag: tag, payload: {})
+
+  def test_by_kit_admits_a_handed_down_port
+    verdict = by_kit(full).judge(request(:shell))
+
+    assert_predicate verdict, :admitted?
+    assert_equal [:by_kit], verdict.grounds.map(&:policy)
+  end
+
+  def test_by_kit_denies_a_port_that_was_not_handed_down
+    verdict = by_kit(full).judge(request(:db))
+
+    assert_predicate verdict, :denied?
+    assert_equal :by_kit, verdict.by
+    assert_match(/渡されていない/, verdict.reason)
+  end
+
+  def test_by_kit_on_nothing_denies_everything
+    assert_predicate by_kit(Kit.nothing).judge(request(:shell)), :denied?
+  end
+
+  def test_by_kit_composes_with_and
+    both = Gear::Admission::Policy::All.new(by_kit(full), Gear::Admission::Policy::AllowAll.new)
+
+    assert_predicate both.judge(request(:shell)), :admitted?
+    assert_predicate both.judge(request(:db)), :denied?, 'AND なので Kit の外は通らない'
+  end
 end
