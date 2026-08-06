@@ -104,4 +104,5 @@ module Gear
   end
 end
 
+require_relative 'executor/replay'
 require_relative 'executor/driver'

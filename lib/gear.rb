@@ -23,6 +23,8 @@ require_relative 'gear/admission'
 require_relative 'gear/receipt'
 require_relative 'gear/journal'
 require_relative 'gear/port'
+require_relative 'gear/kit'
+require_relative 'gear/program'
 require_relative 'gear/executor'
 require_relative 'gear/routine'
 

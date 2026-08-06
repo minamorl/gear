@@ -51,8 +51,7 @@ module Gear
         @policy = policy
         @registry = registry
         @real = registry.real_handlers # tag => 型検証済みの実 handler
-        @recorded = replay_source.port_results # 追記順の外界結果 (読み戻し元)
-        @cursor = 0                            # @recorded の読み戻し位置
+        @replay = Replay.new(recorded: replay_source.port_results, registry: registry)
         @max_effects = max_effects
 
         @out = Journal::Log.new                # 出力 journal (走行の正本)
@@ -111,18 +110,11 @@ module Gear
       def obtain(tick, tag, payload)
         return obtain_random(tick, payload) if tag == Clock::RANDOM_TAG
 
-        if @cursor < @recorded.size
-          entry = @recorded[@cursor]
-          @cursor += 1
-          # 位置だけで進めない: 形の似た schema だと誤値の読み戻しが成功してしまう。
-          raise ReplayMismatch.at(tick, entry, tag) if entry.payload['port'] != tag.to_s
+        # 記録済み境界の内側は Replay が読み戻す (外界を叩かない)。
+        return [*@replay.read_back(tag, tick), true] unless @replay.exhausted?
 
-          recorded = entry.payload['result']
-          [restore(tag, recorded), recorded, true] # 外界は叩かない (records_external_results)
-        else
-          value = @real.fetch(tag).call(payload) # ここが唯一の実外界呼び出し
-          [value, Port.normalize(value.to_h), true]
-        end
+        value = @real.fetch(tag).call(payload) # ここが唯一の実外界呼び出し
+        [value, Port.normalize(value.to_h), true]
       end
 
       # seed と tick だけから導き、replay cursor と port_result には触れない。
@@ -171,13 +163,6 @@ module Gear
           )
         )
         raise AdmissionDenied, verdict
-      end
-
-      # 記録済みの素データを、その tag の result schema で型付き値へ復元する。
-      # replay 時に Task 本体が record 時と同じ型付き値 (r.stdout 等) を受け取れる。
-      def restore(tag, recorded)
-        schema = @registry.for_tag(tag).operation_for(tag).result_schema
-        schema.load(Port.normalize(recorded)).value
       end
     end
   end
