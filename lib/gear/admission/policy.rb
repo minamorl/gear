@@ -45,14 +45,28 @@ module Gear
         end
 
         def judge(request)
-          unless @kit.port?(request.tag)
-            return Verdict.deny(request, reason: "port #{request.tag} は渡されていない", by: :by_kit)
-          end
+          return judge_submit(request) if request.tag == Program::SUBMIT_TAG
+          return refuse(request, "port #{request.tag} は渡されていない") unless @kit.port?(request.tag)
 
-          Verdict.admit(
-            request,
-            grounds: [Grant.new(policy: :by_kit, detail: "port #{request.tag} を渡している")]
-          )
+          allow(request, "port #{request.tag} を渡している")
+        end
+
+        private
+
+        # submit は gear 自身の効果なので Kit の depth と programs で判じる。これは
+        # ドメイン固有ルールではなく機械の規則なので no_hardcoded_domain に当たらない。
+        def judge_submit(request)
+          name = request.payload['name']
+          return refuse(request, '深さが尽きているか繋ぐ相手が渡されていない') unless @kit.submit?
+          return refuse(request, "program #{name} は渡されていない") unless @kit.program?(name)
+
+          allow(request, "program #{name} を渡している")
+        end
+
+        def refuse(request, reason) = Verdict.deny(request, reason: reason, by: :by_kit)
+
+        def allow(request, detail)
+          Verdict.admit(request, grounds: [Grant.new(policy: :by_kit, detail: detail)])
         end
       end
 

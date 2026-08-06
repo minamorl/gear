@@ -46,10 +46,11 @@ module Gear
     class Driver
       # replay_source : 記録済み外界結果の読み戻し元 (Journal::Log)。空なら全て実走。
       # max_effects   : 何個目の効果の手前で中断するか。nil なら中断しない。
-      def initialize(clock:, policy:, registry:, replay_source:, max_effects:, kit: nil)
+      def initialize(clock:, policy:, registry:, replay_source:, max_effects:, kit: nil,
+                     programs: Program::Registry.new)
         @clock = clock
-        @policy = policy
-        @kit = kit # 子へ細めておろす元 (submit で使う)
+        @authority = Authority.new(policy: policy, kit: kit) # 権限の差し替えはここが握る
+        @submission = Submission.new(programs: programs, authority: @authority)
         @registry = registry
         @real = registry.real_handlers # tag => 型検証済みの実 handler
         @replay = Replay.new(recorded: replay_source.port_results, registry: registry)
@@ -62,9 +63,8 @@ module Gear
       end
 
       def run(program, focus)
-        tree = Berylx::EffectTree.build(program, focus)
-        handlers = Berylx::EffectTree.real_handlers(gated_effects)
-        result = Darkcore.fold(tree, on_return: ->(x) { x }, handlers: handlers)
+        @handlers = Berylx::EffectTree.real_handlers(gated_effects)
+        result = fold(program, focus)
         Outcome.new(
           result: result, journal: @out, receipts: @receipts,
           suspended: false, last_tick: @clock.current.index
@@ -82,7 +82,7 @@ module Gear
       # 登録された全 tag を「gate を通す handler」に差し替える。Task 本体からの
       # perform はこの gate 済み handler にしか届かない (admission.no_bypass)。
       def gated_effects
-        (@registry.tags + [Clock::RANDOM_TAG]).to_h do |tag|
+        (@registry.tags + [Clock::RANDOM_TAG, Program::SUBMIT_TAG]).to_h do |tag|
           [tag, ->(payload) { gate(tag, payload) }]
         end
       end
@@ -96,7 +96,7 @@ module Gear
         payload = Port.normalize(payload) # 素の string-key データに揃える (記録可能に)
         tick = @clock.advance             # 効果一つにつき 1 tick (tick.total_order)
         request = Admission::Request.new(tag: tag, payload: payload)
-        verdict = Admission.judge(request, policy: @policy)
+        verdict = @authority.judge(request)
 
         return deny(tick, tag, payload, verdict) if verdict.denied?
 
@@ -110,12 +110,27 @@ module Gear
       # 返り値は [Task へ渡す型付き値, journal に積む素データ]。
       def obtain(tick, tag, payload)
         return obtain_random(tick, payload) if tag == Clock::RANDOM_TAG
+        return obtain_submit(payload) if tag == Program::SUBMIT_TAG
 
         # 記録済み境界の内側は Replay が読み戻す (外界を叩かない)。
         return [*@replay.read_back(tag, tick), true] unless @replay.exhausted?
 
         value = @real.fetch(tag).call(payload) # ここが唯一の実外界呼び出し
         [value, Port.normalize(value.to_h), true]
+      end
+
+      # 子 program を親と同じ clock / journal / receipt 鎖の上で inline に走らせる。
+      # 子の効果は子自身の port_result として journal に載るので、submit 自体は外界
+      # 結果を持たない (external: false)。replay では子を走らせ直し、子の効果が
+      # 記録を順に読み戻すので cursor が揺れない。
+      def obtain_submit(payload)
+        produced = @submission.run(payload) { |task, focus| fold(task, focus) }
+        [produced, produced, false]
+      end
+
+      # berylx program を darkcore Effect 木へ compile して 1 本走らせる。
+      def fold(task, focus)
+        Darkcore.fold(Berylx::EffectTree.build(task, focus), on_return: ->(x) { x }, handlers: @handlers)
       end
 
       # seed と tick だけから導き、replay cursor と port_result には触れない。

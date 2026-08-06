@@ -17,6 +17,18 @@ module Gear
   # #candidates_for は候補を挙げるだけの問い合わせで、選ぶのは利用側。
   # ==================================================================
   module Program
+    # gear 自身の効果 tag。program から子 program へ繋ぐ唯一の口。port adapter では
+    # なく機械の効果なので、Driver が握る (Clock::RANDOM_TAG と同じ位置)。
+    SUBMIT_TAG = :program_submit
+
+    # 子 program が Err で閉じた合図。StandardError なので親の Task#call が結果封筒の
+    # Err へ翻訳する — 子の失敗は親へ値として返る (admission.denial_is_value の精神)。
+    class ChildFailed < StandardError; end
+
+    # 宣言した境界を破った合図。これも値として親へ返す (走行の前提破りではなく、
+    # 呼び方または宣言が間違っているという program の誤り)。
+    class BoundaryError < StandardError; end
+
     Declaration = Data.define(:name, :task, :input, :output) do
       # 走らせる前に、渡す予定の素データが入力の形を満たすか検査できる。
       def accepts?(data) = input.load(Port.normalize(data)).ok?

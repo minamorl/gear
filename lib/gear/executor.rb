@@ -94,25 +94,20 @@ module Gear
     #   kit         : program へおろす権限セット (Gear::Kit)。渡すと「渡した範囲」が
     #                 天井になり、宣言が focus へ載って program 自身から読める。
     #                 nil なら従来どおり policy だけが判定する。
+    #   programs    : 子 program の名簿 (Gear::Program::Registry)。既定は空なので、
+    #                 名簿へ登録していない program は submit できない。
     def run(program, policy:, seed:, focus: {}, registry: Port.registry,
-            journal: Journal::Log.new, max_effects: nil, kit: nil)
+            journal: Journal::Log.new, max_effects: nil, kit: nil,
+            programs: Program::Registry.new)
       Driver.new(
         clock: Clock.new(seed: seed),
-        policy: capped_policy(policy, kit),
+        policy: policy,
         registry: registry,
         replay_source: journal,
         max_effects: max_effects,
-        kit: kit
+        kit: kit,
+        programs: programs
       ).run(program, focus_with_kit(focus, kit))
-    end
-
-    # kit を渡したときは、渡した範囲が天井になる (policy はその内側で更に絞れる)。
-    # kit 無しなら policy だけ — 既定のスタンスを gear 本体へ焼かない
-    # (admission.policy_pluggable / no_hardcoded_domain)。
-    def capped_policy(policy, kit)
-      return policy if kit.nil?
-
-      Admission::Policy::All.new(Admission::Policy::ByKit.new(kit), policy)
     end
 
     # 渡された範囲を program が読めるように、宣言を focus へ置く。生オブジェクトでは
@@ -124,9 +119,10 @@ module Gear
 
       focus.merge(Kit::FOCUS_KEY => kit.to_h)
     end
-    private_class_method :capped_policy, :focus_with_kit
   end
 end
 
+require_relative 'executor/authority'
+require_relative 'executor/submission'
 require_relative 'executor/replay'
 require_relative 'executor/driver'
