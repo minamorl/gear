@@ -187,4 +187,53 @@ class GearSubmitTest < Minitest::Test
     assert_equal [2], second, '再開したぶんだけ外界を叩く'
     assert_equal 4, resumed.result.focus.to_h[:from_child]
   end
+
+  # ---- 並列分岐から同時に submit しても壊れない ----
+  # 効果 1 つを不可分にする前は、枝の submit が他の枝が細めた Kit を見て「深さが
+  # 尽きている」と偽の拒否を受けていた (実測で約 2.5%)。確率的に壊れるので反復で見る。
+  def test_parallel_submits_do_not_corrupt_each_others_kit
+    par = submitter(:double, :a) & submitter(:triple, :b)
+    broken = 200.times.count do
+      out = Executor.run(par, policy: allow, seed: 1, registry: two_ports([]),
+                              programs: two_programs, kit: two_kit)
+      focus = out.result.respond_to?(:focus) ? out.result.focus.to_h : {}
+      focus[:a] != 4 || focus[:b] != 6
+    end
+
+    assert_equal 0, broken, '並列 submit で偽の拒否や取り落ちが起きない'
+  end
+
+  def two_ports(calls)
+    reg = Gear::Port::Registry.new
+    { probe2: 2, probe3: 3 }.each do |name, factor|
+      reg.register(
+        Gear::Port::Adapter.new(name).operation(name, payload: PROBE_IN, result: PROBE_OUT) do |payload|
+          calls << name
+          { 'n' => payload['n'], 'doubled' => payload['n'] * factor }
+        end
+      )
+    end
+    reg
+  end
+
+  def two_programs
+    Gear::Program::Registry.new
+                           .register(name: :double, task: effectful_child(:probe2), input: PROBE_IN, output: PROBE_OUT)
+                           .register(name: :triple, task: effectful_child(:probe3), input: PROBE_IN, output: PROBE_OUT)
+  end
+
+  def effectful_child(tag)
+    Berylx::Task[tag] { |lay, io| lay.put(:doubled, io.perform(tag, { 'n' => lay[:n].fetch }).doubled) }
+  end
+
+  def submitter(name, key)
+    Berylx::Task[:"submit_#{name}"] do |lay, io|
+      out = io.perform(Gear::Program::SUBMIT_TAG, { 'name' => name.to_s, 'focus' => { 'n' => 2 } })
+      lay.put(key, out['doubled'])
+    end
+  end
+
+  def two_kit
+    Gear::Kit.of(ports: %i[probe2 probe3 program_submit], programs: %i[double triple], depth: 1)
+  end
 end

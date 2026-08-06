@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'monitor'
 require 'darkcore'
 require 'berylx'
 
@@ -49,6 +50,7 @@ module Gear
       def initialize(clock:, policy:, registry:, replay_source:, max_effects:, kit: nil,
                      programs: Program::Registry.new)
         @clock = clock
+        @lock = Monitor.new # 効果 1 つを不可分にする。子の gate から再入するので Mutex 不可
         @authority = Authority.new(policy: policy, kit: kit) # 権限の差し替えはここが握る
         @submission = Submission.new(programs: programs, authority: @authority)
         @registry = registry
@@ -81,9 +83,14 @@ module Gear
 
       # 登録された全 tag を「gate を通す handler」に差し替える。Task 本体からの
       # perform はこの gate 済み handler にしか届かない (admission.no_bypass)。
+      #
+      # 並列分岐 (berylx の &) は Thread で走るので、走行の可変状態 (clock / journal /
+      # receipt 鎖 / Kit スタック) を素で触ると壊れる。実測では枝の submit が他の枝が
+      # 細めた Kit を見て「深さが尽きている」と偽の拒否を受け、その嘘が根拠として
+      # journal に載った。効果 1 つを不可分にして塞ぐ。
       def gated_effects
         (@registry.tags + [Clock::RANDOM_TAG, Program::SUBMIT_TAG]).to_h do |tag|
-          [tag, ->(payload) { gate(tag, payload) }]
+          [tag, ->(payload) { @lock.synchronize { gate(tag, payload) } }]
         end
       end
 
