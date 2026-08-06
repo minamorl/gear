@@ -100,9 +100,11 @@ module Gear
 
         return deny(tick, tag, payload, verdict) if verdict.denied?
 
+        # 予算は「始めた時点」で数える。完了を待って数えると、子を走らせる効果
+        # (submit) が数えられる前に子の効果が走り、入れ子の深さぶん予算を超える。
+        @processed += 1
         value, recorded, external = obtain(tick, tag, payload)
         record_effect(tick, tag, payload, recorded, verdict, external: external)
-        @processed += 1
         value
       end
 

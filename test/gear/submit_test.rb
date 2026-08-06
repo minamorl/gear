@@ -154,4 +154,37 @@ class GearSubmitTest < Minitest::Test
     assert_empty calls, '境界を満たさないなら子は走らない'
     assert_instance_of Berylx::Err, out.result
   end
+
+  # ---- submit を含む走行も record -> replay で同じになる ----
+  # 子の効果は子自身の port_result として記録されるので、replay では子を走らせ直し、
+  # 子の効果が記録を順に読み戻す。submit 自身は外界結果を持たないので cursor は揺れない。
+  def test_run_with_submit_replays_deterministically
+    recorded = run_parent(calls: rec_calls = [])
+
+    assert_equal [2], rec_calls, '記録時は子が実際に外界を叩く'
+
+    replayed = Executor.run(parent, policy: allow, seed: 1, registry: ports(replay_calls = []),
+                                    programs: programs, kit: kit, journal: recorded.journal)
+
+    assert_empty replay_calls, 'replay は外界を叩かない (子の効果も読み戻す)'
+    assert_equal recorded.receipts, replayed.receipts, 'receipt 列が一致する'
+    assert_equal Gear::Journal.dump(recorded.journal), Gear::Journal.dump(replayed.journal)
+    assert_equal 4, replayed.result.focus.to_h[:from_child]
+  end
+
+  # ---- 入れ子でも中断と再開が効く ----
+  def test_submit_can_be_interrupted_and_resumed
+    partial = Executor.run(parent, policy: allow, seed: 1, registry: ports(first = []),
+                                   programs: programs, kit: kit, max_effects: 1)
+
+    assert_predicate partial, :suspended?, 'submit の手前で止まる'
+    assert_empty first, '止まった時点では子は走っていない'
+
+    resumed = Executor.run(parent, policy: allow, seed: 1, registry: ports(second = []),
+                                   programs: programs, kit: kit, journal: partial.journal)
+
+    refute_predicate resumed, :suspended?
+    assert_equal [2], second, '再開したぶんだけ外界を叩く'
+    assert_equal 4, resumed.result.focus.to_h[:from_child]
+  end
 end
