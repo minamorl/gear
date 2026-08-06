@@ -55,6 +55,11 @@ module Gear
                       kit: data['kit'] && Kit.from_h(data['kit']), seed: data['seed'])
       rescue JSON::ParserError => e
         reject(text, "JSON として読めない: #{e.message}")
+      rescue StandardError => e
+        # JSON としては読めるが形が違う行 (top-level が Hash でない / kit の形が違う 等)。
+        # ここで閉じ込めないと absorb ごと例外離脱し、同じバッファの後続行が rejected にも
+        # 残らず消える。常駐ループなら 1 行で受付が止まる (監査で再現)。
+        reject(text, "投入として受けられない: #{e.class}: #{e.message}")
       end
 
       def reject(line, reason)

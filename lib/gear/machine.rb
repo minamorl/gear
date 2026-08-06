@@ -60,6 +60,8 @@ module Gear
       @policy = policy
       @intake = intake
       @ledger = ledger
+      # 台帳を引き継いだ受付列は ticket 番号も引き継ぐ (衝突すると resume が別の走行を続ける)。
+      @intake.advance_to(@ledger.max_ticket)
     end
 
     # 投げ込む。走らせない (拾うのは #step)。判定は拾う段でまとめて通る。

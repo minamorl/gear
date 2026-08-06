@@ -29,6 +29,9 @@ module Gear
     # 呼び方または宣言が間違っているという program の誤り)。
     class BoundaryError < StandardError; end
 
+    # submit の入れ子が上限を超えた合図。値として親へ返す (走行は壊れていない)。
+    class TooDeep < StandardError; end
+
     Declaration = Data.define(:name, :task, :input, :output) do
       # 走らせる前に、渡す予定の素データが入力の形を満たすか検査できる。
       def accepts?(data) = input.load(Port.normalize(data)).ok?

@@ -136,7 +136,7 @@ module Gear
       # port : 論理 port 名 (Symbol/String)。
       # block: 外界を実際に叩く手続き。replay 時は絶対に呼ばれない。
       def call(tick, port)
-        return replay_next if replaying?
+        return replay_next(port) if replaying?
 
         result = yield
         @log = @log.append(
@@ -147,13 +147,20 @@ module Gear
 
       private
 
-      def replay_next
+      # 位置だけで記録を消費しない (pin replay.no_silent_readback)。要求された port と
+      # 記録された port が違うなら読み戻さない。
+      def replay_next(port)
         entry = @recorded[@cursor]
         if entry.nil?
           raise CrossedBoundary,
                 '記録された境界を踏み越えた: replay に読み戻せる外界結果が尽きた'
         end
         @cursor += 1
+        if entry.payload['port'] != port.to_s
+          raise CrossedBoundary,
+                "記録は #{entry.payload['port']} だが #{port} を要求した: 記録と走行が食い違っている"
+        end
+
         entry.payload['result']
       end
     end

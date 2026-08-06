@@ -45,38 +45,33 @@ module Gear
     #                              seed からは同じ receipt 列・同じ journal が再生される。
     # ==================================================================
     class Driver
+      # submit の入れ子の上限。Kit を渡していない走行でも無限入れ子を構造で止める。
+      MAX_SUBMIT_DEPTH = 32
+
       # replay_source : 記録済み外界結果の読み戻し元 (Journal::Log)。空なら全て実走。
       # max_effects   : 何個目の効果の手前で中断するか。nil なら中断しない。
       def initialize(clock:, policy:, registry:, replay_source:, max_effects:, kit: nil,
                      programs: Program::Registry.new)
         @clock = clock
-        @lock = Monitor.new # 効果 1 つを不可分にする。子の gate から再入するので Mutex 不可
-        @authority = Authority.new(policy: policy, kit: kit) # 権限の差し替えはここが握る
-        @submission = Submission.new(programs: programs, authority: @authority)
+        @lock = Monitor.new # 走行の可変状態を触る区間だけを不可分にする
+        @kit = kit # 走行に渡された範囲。入れ子では handler へ閉じ込めて渡す
+        @authority = Authority.new(policy: policy)
+        @submission = Submission.new(programs: programs)
         @registry = registry
         @real = registry.real_handlers # tag => 型検証済みの実 handler
         @replay = Replay.new(recorded: replay_source.port_results, registry: registry)
         @max_effects = max_effects
 
-        @out = Journal::Log.new                # 出力 journal (走行の正本)
-        @receipts = []                         # 発行順の receipt 列
-        @last_receipt = nil                    # 鎖の直前 (predecessor)
-        @processed = 0                         # 処理した効果数 (replay + 実走)
+        @recorder = Recorder.new # 記録は別責務 (追記と receipt 鎖)
+        @processed = 0 # 処理した効果数 (replay + 実走)
       end
 
       def run(program, focus)
-        @handlers = Berylx::EffectTree.real_handlers(gated_effects)
-        result = fold(program, focus)
-        Outcome.new(
-          result: result, journal: @out, receipts: @receipts,
-          suspended: false, last_tick: @clock.current.index
-        )
+        result = fold(program, focus, @kit, 0)
+        outcome(result, suspended: false)
       rescue Suspend
         # 予算に達したので、記録した分を持って中断する。program の結果は未確定。
-        Outcome.new(
-          result: nil, journal: @out, receipts: @receipts,
-          suspended: true, last_tick: @clock.current.index
-        )
+        outcome(nil, suspended: true)
       end
 
       private
@@ -84,62 +79,105 @@ module Gear
       # 登録された全 tag を「gate を通す handler」に差し替える。Task 本体からの
       # perform はこの gate 済み handler にしか届かない (admission.no_bypass)。
       #
-      # 並列分岐 (berylx の &) は Thread で走るので、走行の可変状態 (clock / journal /
-      # receipt 鎖 / Kit スタック) を素で触ると壊れる。実測では枝の submit が他の枝が
-      # 細めた Kit を見て「深さが尽きている」と偽の拒否を受け、その嘘が根拠として
-      # journal に載った。効果 1 つを不可分にして塞ぐ。
-      def gated_effects
-        (@registry.tags + [Clock::RANDOM_TAG, Program::SUBMIT_TAG]).to_h do |tag|
-          [tag, ->(payload) { @lock.synchronize { gate(tag, payload) } }]
-        end
+      # Kit と入れ子の深さは**この handler に閉じ込める**。共有スタックで持つと並列
+      # 分岐 (Thread) の枝どうしで壊れ、ロックで守ると子の fold をロック内で回して
+      # 恒久デッドロックする (どちらも実測)。fold ごとに handler を作れば、枝が何本
+      # 走っても各枝は自分の範囲だけを見る。
+      def handlers_for(kit, depth)
+        Berylx::EffectTree.real_handlers(
+          (@registry.tags + [Clock::RANDOM_TAG, Program::SUBMIT_TAG]).to_h do |tag|
+            [tag, ->(payload) { gate(tag, payload, kit, depth) }]
+          end
+        )
       end
 
       # 効果一つ分の綴じ目。judge → (Denied なら記録して閉じる / Admitted なら
       # 読み戻すか実走して receipt を出す) → 結果を Task へ返す。
-      def gate(tag, payload)
-        # 予算に達していたら、この効果の手前で中断する。tick も外界も触らない。
-        raise Suspend if @max_effects && @processed >= @max_effects
-
+      #
+      # ロックは**走行の可変状態を触る区間だけ**にかける。実外界呼び出しと子 program の
+      # fold をロックの内側で回すと、子や兄弟の枝が同じロックを待ち、こちらは枝の join を
+      # 待って永久に噛み合う (監査で恒久デッドロックを再現)。記録は不可分、実行は並行。
+      def gate(tag, payload, kit, depth)
         payload = Port.normalize(payload) # 素の string-key データに揃える (記録可能に)
-        tick = @clock.advance             # 効果一つにつき 1 tick (tick.total_order)
-        request = Admission::Request.new(tag: tag, payload: payload)
-        verdict = @authority.judge(request)
-
+        tick, verdict = admit(tag, payload, kit)
         return deny(tick, tag, payload, verdict) if verdict.denied?
 
-        # 予算は「始めた時点」で数える。完了を待って数えると、子を走らせる効果
-        # (submit) が数えられる前に子の効果が走り、入れ子の深さぶん予算を超える。
-        @processed += 1
-        value, recorded, external = obtain(tick, tag, payload)
-        record_effect(tick, tag, payload, recorded, verdict, external: external)
+        value, recorded, external = obtain(tick, tag, payload, kit, depth, verdict)
+        commit(tick, tag, payload, recorded, verdict, external: external)
         value
+      end
+
+      # 予算・tick・judge を不可分に済ませる。予算は「始めた時点」で数える
+      # (完了時に数えると入れ子の深さぶん超える)。
+      def admit(tag, payload, kit)
+        @lock.synchronize do
+          raise Suspend if @max_effects && @processed >= @max_effects
+
+          tick = @clock.advance # 効果一つにつき 1 tick (tick.total_order)
+          request = Admission::Request.new(tag: tag, payload: payload)
+          verdict = @authority.judge(request, kit: kit)
+          @processed += 1 unless verdict.denied?
+          [tick, verdict]
+        end
+      end
+
+      def outcome(result, suspended:)
+        Outcome.new(result: result, journal: @recorder.journal, receipts: @recorder.receipts,
+                    suspended: suspended, last_tick: @clock.current.index)
+      end
+
+      def commit(tick, tag, payload, recorded, verdict, external:)
+        @recorder.effect(tick: tick.index, tag: tag, payload: payload,
+                         recorded: recorded, verdict: verdict, external: external)
       end
 
       # Admitted。記録済み境界の内側なら読み戻し (再実行しない)、外なら実走する。
       # 返り値は [Task へ渡す型付き値, journal に積む素データ]。
-      def obtain(tick, tag, payload)
+      def obtain(tick, tag, payload, kit, depth, verdict)
         return obtain_random(tick, payload) if tag == Clock::RANDOM_TAG
-        return obtain_submit(payload) if tag == Program::SUBMIT_TAG
+        return obtain_submit(payload, kit, depth) if tag == Program::SUBMIT_TAG
 
-        # 記録済み境界の内側は Replay が読み戻す (外界を叩かない)。
-        return [*@replay.read_back(tag, tick), true] unless @replay.exhausted?
+        # 記録済み境界の内側は Replay が読み戻す (外界を叩かない)。cursor の消費は
+        # 不可分にする (並列の枝が同時に読み戻すと取り違える)。
+        recorded = @lock.synchronize { @replay.exhausted? ? nil : @replay.read_back(tag, tick, payload) }
+        return [*recorded, true] if recorded
 
-        value = @real.fetch(tag).call(payload) # ここが唯一の実外界呼び出し
-        [value, Port.normalize(value.to_h), true]
+        [*call_external(tick, tag, payload, verdict), true]
+      end
+
+      # 唯一の実外界呼び出し。ロックの外なので並列の枝は本当に並列に走る。
+      # 叩いた後に失敗しても「叩いた」ことは残す — 副作用が起きたのに receipt が
+      # 無い状態を作らない (pin receipt.no_silent_effect)。記録してから raise し直す。
+      def call_external(tick, tag, payload, verdict)
+        value = @real.fetch(tag).call(payload)
+        [value, Port.normalize(value.to_h)]
+      rescue StandardError => e
+        @recorder.failure(tick: tick.index, tag: tag, payload: payload, verdict: verdict, error: e)
+        raise
       end
 
       # 子 program を親と同じ clock / journal / receipt 鎖の上で inline に走らせる。
       # 子の効果は子自身の port_result として journal に載るので、submit 自体は外界
       # 結果を持たない (external: false)。replay では子を走らせ直し、子の効果が
       # 記録を順に読み戻すので cursor が揺れない。
-      def obtain_submit(payload)
-        produced = @submission.run(payload) { |task, focus| fold(task, focus) }
+      # 子は一段細めた Kit と 1 つ深い深さで走る。Kit が nil のときは細める先が無く
+      # 深さも減らないので、機械側の上限で無限入れ子を止める (実測: 自己 submit が
+      # SystemStackError になり journal も台帳も残らなかった)。
+      def obtain_submit(payload, kit, depth)
+        raise Program::TooDeep, "submit の入れ子が上限 #{MAX_SUBMIT_DEPTH} を超えた" if depth >= MAX_SUBMIT_DEPTH
+
+        child_kit = kit&.descend
+        produced = @submission.run(payload) do |task, focus|
+          fold(task, child_kit ? Executor.focus_with_kit(focus, child_kit) : focus, child_kit, depth + 1)
+        end
         [produced, produced, false]
       end
 
       # berylx program を darkcore Effect 木へ compile して 1 本走らせる。
-      def fold(task, focus)
-        Darkcore.fold(Berylx::EffectTree.build(task, focus), on_return: ->(x) { x }, handlers: @handlers)
+      # handler は fold ごとに作る (Kit と深さをそこへ閉じ込めるため)。
+      def fold(task, focus, kit, depth)
+        Darkcore.fold(Berylx::EffectTree.build(task, focus),
+                      on_return: ->(x) { x }, handlers: handlers_for(kit, depth))
       end
 
       # seed と tick だけから導き、replay cursor と port_result には触れない。
@@ -157,36 +195,11 @@ module Gear
         [Clock::RANDOM_RESULT.load(raw).value, raw, false]
       end
 
-      # 実走の一歩を journal に綴じる: 外界結果 (port_result) と receipt を積む。
-      def record_effect(tick, tag, payload, recorded, verdict, external:)
-        if external
-          @out = @out.append(
-            Journal::Entry.at(tick.index, Journal::PORT_RESULT, 'port' => tag.to_s, 'result' => recorded)
-          )
-        end
-        receipt = Receipt.issue(
-          effect: { tag: tag, payload: payload },
-          outcome: Receipt.ok(recorded),
-          grounds: verdict,
-          tick: tick.index,
-          predecessor: @last_receipt
-        )
-        @out = @out.append(Journal::Entry.at(tick.index, :receipt, receipt.to_h))
-        @receipts << receipt
-        @last_receipt = receipt
-      end
-
-      # Denied。副作用を起こさず拒否を journal に記録し、program を Err で閉じる。
+      # Denied。副作用を起こさず拒否を記録し、program を Err で閉じる。
       # AdmissionDenied は StandardError なので Task#call の rescue が Err に翻訳する
       # (admission.denial_is_value: 判定は値、例外はその閉じ方の実装手段)。
       def deny(tick, tag, payload, verdict)
-        @out = @out.append(
-          Journal::Entry.at(
-            tick.index, :admission_denied,
-            'tag' => tag.to_s, 'payload' => payload,
-            'reason' => verdict.reason.to_s, 'by' => verdict.by.to_s
-          )
-        )
+        @recorder.denial(tick: tick.index, tag: tag, payload: payload, verdict: verdict)
         raise AdmissionDenied, verdict
       end
     end

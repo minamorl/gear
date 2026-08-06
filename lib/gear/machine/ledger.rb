@@ -37,9 +37,20 @@ module Gear
       end
 
       # 走行の journal を ticket に結び付けて覚える (正本への索引)。
+      #
+      # **縮めない。** resume が前回より手前で止まった (予算切れ / 拒否 / Err) ときに
+      # 短い journal で差し替えると、記録済みの外界結果が消えて次の resume が同じ
+      # 副作用を叩き直す (監査で再現)。記録が減る差し替えは受けない。
       def remember(ticket, journal)
-        @lock.synchronize { @journals[ticket] = journal }
+        @lock.synchronize do
+          current = @journals[ticket]
+          @journals[ticket] = journal if current.nil? || !shrinks?(current, journal)
+          @journals[ticket]
+        end
       end
+
+      # これまでに使われた最大の ticket。機械を建て直すとき受付列へ引き継ぐ。
+      def max_ticket = @lock.synchronize { @records.map(&:ticket).max || 0 }
 
       def journal_for(ticket) = @lock.synchronize { @journals[ticket] }
       def journals = @lock.synchronize { @journals.dup }
@@ -51,6 +62,12 @@ module Gear
 
       # ticket ごとの最後の kind。いま何が起きている状態かの読み出し。
       def state_of(ticket) = for_ticket(ticket).last&.kind
+
+      private
+
+      def shrinks?(current, candidate)
+        candidate.port_results.size < current.port_results.size
+      end
     end
   end
 end

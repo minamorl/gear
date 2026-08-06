@@ -68,6 +68,19 @@ module Gear
       end
     end
 
+    # 記録が現在の result schema で読み戻せない合図。ReplayMismatch と同じく走行の
+    # 前提破りなので、黙って nil を型付き値として渡さず走行の外まで抜ける。
+    class ReplayUnreadable < Exception # rubocop:disable Lint/InheritException
+      attr_reader :tick, :tag, :violations
+
+      def initialize(tick:, tag:, violations:)
+        @tick = tick
+        @tag = tag
+        @violations = violations
+        super("tick #{tick}: #{tag} の記録が result schema で読み戻せない: #{violations.join('; ')}")
+      end
+    end
+
     # admission が拒否した効果を実行しようとしたときの合図。こちらは
     # StandardError なので Task#call が捕まえ、berylx の Err へ翻訳される
     # (拒否は検査可能な結果値として program を閉じる)。
@@ -122,6 +135,7 @@ module Gear
   end
 end
 
+require_relative 'executor/recorder'
 require_relative 'executor/authority'
 require_relative 'executor/submission'
 require_relative 'executor/replay'

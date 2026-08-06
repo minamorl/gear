@@ -64,6 +64,13 @@ module Gear
 
       # これまでに発行した ticket の数。
       def issued = @lock.synchronize { @issued }
+
+      # 発行済みの番号を引き継ぐ。台帳を渡して機械を建て直すとき、受付列が 1 から
+      # やり直すと ticket が衝突し、resume が別の走行の journal を続けてしまう
+      # (監査で再現)。既に使われた最大値まで進めておく。
+      def advance_to(ticket)
+        @lock.synchronize { @issued = [@issued, ticket.to_i].max }
+      end
     end
   end
 end
