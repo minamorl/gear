@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require 'json'
 require 'gear'
 require 'berylx'
 require 'zeolite'
@@ -235,5 +236,34 @@ class GearSubmitTest < Minitest::Test
 
   def two_kit
     Gear::Kit.of(ports: %i[probe2 probe3 program_submit], programs: %i[double triple], depth: 1)
+  end
+
+  # ---- 根拠が機械可読であること (inspect 文字列を journal へ載せない) ----
+  def test_grounds_are_machine_readable_not_inspect_strings
+    receipts = run_parent.receipts
+    submit = receipts.last.grounds
+
+    assert_equal 'admitted', submit['verdict']
+    assert_equal Gear::Program::SUBMIT_TAG.to_s, submit['request']['tag']
+    assert_equal 'double', submit['request']['payload']['name']
+    assert_equal(%w[by_kit allow_all], submit['grounds'].map { |g| g['policy'] })
+    assert_match(/program double を渡している/, submit['grounds'].first['detail'])
+  end
+
+  def test_no_inspect_string_leaks_into_the_journal
+    dump = Gear::Journal.dump(run_parent.journal)
+
+    refute_match(/#<data /, dump, 'journal に Ruby の inspect 文字列を残さない')
+    refute_match(/#<Gear/, dump)
+    dump.each_line { |l| JSON.parse(l) } # NDJSON として読み戻せる
+  end
+
+  def test_denied_grounds_are_machine_readable_too
+    out = run_parent(kit_arg: kit(depth: 0))
+    denied = out.journal.to_a.find { |e| e.kind == :admission_denied }
+
+    assert_equal 'program_submit', denied.payload['tag']
+    assert_equal 'by_kit', denied.payload['by']
+    assert_match(/深さが尽きている/, denied.payload['reason'])
   end
 end

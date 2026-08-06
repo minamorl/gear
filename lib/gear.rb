@@ -27,6 +27,7 @@ require_relative 'gear/kit'
 require_relative 'gear/program'
 require_relative 'gear/executor'
 require_relative 'gear/routine'
+require_relative 'gear/view'
 require_relative 'gear/machine'
 
 module Gear

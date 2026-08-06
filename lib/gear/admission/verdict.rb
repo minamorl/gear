@@ -8,7 +8,11 @@ module Gear
     # Admitted の grounds はこの列。後段の receipt はこの列を根拠鎖の起点に
     # できる (spec: receipt.carries_grounds — receipt は「何が許可したか」を持つ)。
     # ==================================================================
-    Grant = Data.define(:policy, :detail)
+    Grant = Data.define(:policy, :detail) do
+      # 機械可読な素データ。receipt の grounds はこの形で journal に載るので、
+      # inspect 文字列 (#<data ...>) を根拠として記録しない。
+      def to_h = { 'policy' => policy.to_s, 'detail' => detail.to_s }
+    end
 
     # ==================================================================
     # 許可。何が許可したか (grounds) を必ず持つ。空の許可は作らない
@@ -17,6 +21,11 @@ module Gear
     Admitted = Data.define(:request, :grounds) do
       def admitted? = true
       def denied? = false
+
+      # 根拠を機械が辿れる形で出す (receipt.carries_grounds)。
+      def to_h
+        { 'verdict' => 'admitted', 'request' => request.to_h, 'grounds' => grounds.map(&:to_h) }
+      end
     end
 
     # ==================================================================
@@ -32,6 +41,11 @@ module Gear
 
       # 拒否も grounds として一様に読めるようにしておく (監査・記録用)。
       def grounds = [Grant.new(policy: by, detail: reason)]
+
+      def to_h
+        { 'verdict' => 'denied', 'request' => request.to_h, 'reason' => reason.to_s,
+          'by' => by.to_s, 'grounds' => grounds.map(&:to_h) }
+      end
     end
 
     # ==================================================================

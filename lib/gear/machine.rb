@@ -3,6 +3,7 @@
 require 'berylx'
 require_relative 'machine/intake'
 require_relative 'machine/ledger'
+require_relative 'machine/feed'
 
 module Gear
   # ==================================================================

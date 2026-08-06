@@ -16,6 +16,9 @@ module Gear
       def self.from_effect(effect)
         new(tag: effect.tag, payload: effect.payload)
       end
+
+      # 機械可読な素データ。payload は既に素の形に揃っている。
+      def to_h = { 'tag' => tag.to_s, 'payload' => payload }
     end
   end
 end
