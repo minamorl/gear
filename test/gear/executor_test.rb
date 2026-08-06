@@ -289,4 +289,54 @@ class GearExecutorTest < Minitest::Test
     assert_equal(1, out.journal.count { |entry| entry.kind == :admission_denied })
     assert_empty out.receipts
   end
+  # ---- journal と program の効果順が食い違ったら黙って読み戻さない ----
+  # 結果の「形」が同じ 2 枚の adapter を用意すると、位置だけで cursor を進める実装では
+  # 逆順 program でも読み戻しが成功し、誤値が state に入り receipt に嘘の根拠が載る。
+  # tag を照合して走行の外まで抜けることを実測で示す。
+  SAME_SHAPE_PAYLOAD = Zeolite.schema(n: :integer).named(:SameShapePayload)
+  SAME_SHAPE_RESULT  = Zeolite.schema(n: :integer, doubled: :integer).named(:SameShapeResult)
+
+  def same_shape_registry
+    reg = Gear::Port::Registry.new
+    { alpha: 2, beta: 10 }.each do |name, factor|
+      reg.register(
+        Gear::Port::Adapter.new(name).operation(
+          name, payload: SAME_SHAPE_PAYLOAD, result: SAME_SHAPE_RESULT
+        ) { |payload| { 'n' => payload['n'], 'doubled' => payload['n'] * factor } }
+      )
+    end
+    reg
+  end
+
+  def same_shape_task(tag, key)
+    Berylx::Task[tag] { |lay, io| lay.put(key, io.perform(tag, { 'n' => 2 }).doubled) }
+  end
+
+  def test_replay_against_diverging_effect_order_raises_instead_of_restoring_wrong_value
+    recorded = Executor.run(same_shape_task(:alpha, :a) >> same_shape_task(:beta, :b),
+                            policy: allow, seed: 1, registry: same_shape_registry)
+
+    assert_equal({ a: 4, b: 20 }, recorded.result.focus.to_h)
+
+    error = assert_raises(Executor::ReplayMismatch) do
+      Executor.run(same_shape_task(:beta, :b) >> same_shape_task(:alpha, :a),
+                   policy: allow, seed: 1, registry: same_shape_registry,
+                   journal: recorded.journal)
+    end
+
+    assert_equal 'alpha', error.recorded_port
+    assert_equal :beta, error.requested_tag
+    assert_match(/journal は alpha を記録している/, error.message)
+  end
+
+  def test_replay_against_same_effect_order_still_reads_back
+    recorded = Executor.run(same_shape_task(:alpha, :a) >> same_shape_task(:beta, :b),
+                            policy: allow, seed: 1, registry: same_shape_registry)
+    replayed = Executor.run(same_shape_task(:alpha, :a) >> same_shape_task(:beta, :b),
+                            policy: allow, seed: 1, registry: same_shape_registry,
+                            journal: recorded.journal)
+
+    assert_equal recorded.receipts, replayed.receipts
+    assert_equal({ a: 4, b: 20 }, replayed.result.focus.to_h)
+  end
 end

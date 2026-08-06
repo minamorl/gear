@@ -47,6 +47,27 @@ module Gear
     # トランポリンの外 (Driver#run) まで抜けるため。
     class Suspend < Exception; end # rubocop:disable Lint/InheritException
 
+    # journal が記録している効果順と program が要求する効果順が食い違った合図。
+    # Suspend と同じく StandardError を継承しない — これは program の失敗ではなく
+    # 「journal と program の対応が壊れている」という走行の前提破りなので、Err へ
+    # 翻訳して結果封筒に混ぜず、走行の外まで抜けさせる (黙って誤値を返さない)。
+    class ReplayMismatch < Exception # rubocop:disable Lint/InheritException
+      attr_reader :tick, :recorded_port, :requested_tag
+
+      # journal の entry と、いま program が要求した tag から起こす。
+      def self.at(tick, entry, tag)
+        new(tick: tick.index, recorded_port: entry.payload['port'], requested_tag: tag)
+      end
+
+      def initialize(tick:, recorded_port:, requested_tag:)
+        @tick = tick
+        @recorded_port = recorded_port
+        @requested_tag = requested_tag
+        super("tick #{tick}: journal は #{recorded_port} を記録しているが " \
+              "program は #{requested_tag} を要求した")
+      end
+    end
+
     # admission が拒否した効果を実行しようとしたときの合図。こちらは
     # StandardError なので Task#call が捕まえ、berylx の Err へ翻訳される
     # (拒否は検査可能な結果値として program を閉じる)。

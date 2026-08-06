@@ -114,6 +114,9 @@ module Gear
         if @cursor < @recorded.size
           entry = @recorded[@cursor]
           @cursor += 1
+          # 位置だけで進めない: 形の似た schema だと誤値の読み戻しが成功してしまう。
+          raise ReplayMismatch.at(tick, entry, tag) if entry.payload['port'] != tag.to_s
+
           recorded = entry.payload['result']
           [restore(tag, recorded), recorded, true] # 外界は叩かない (records_external_results)
         else
