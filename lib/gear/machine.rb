@@ -83,11 +83,31 @@ module Gear
       done.compact
     end
 
+    # 中断した走行を、台帳が指す journal を種に続ける。記録済みの外界は叩き直さない。
+    # 投入は台帳の受付記録から組み直すので、機械を捨てて作り直しても続けられる
+    # (台帳が JSON-safe な素データであることがそのまま可搬性になっている)。
+    def resume(ticket, max_effects: nil)
+      journal = @ledger.journal_for(ticket)
+      raise KeyError, "ticket #{ticket} には続ける走行が無い" if journal.nil?
+
+      launch(submission_of(ticket), journal: journal, max_effects: max_effects)
+    end
+
     def pending = @intake.size
     def journal_for(ticket) = @ledger.journal_for(ticket)
     def state_of(ticket) = @ledger.state_of(ticket)
 
     private
+
+    # 台帳の受付記録から投入を組み直す。Kit は宣言データから戻す。
+    def submission_of(ticket)
+      record = @ledger.for_ticket(ticket).find { |r| r.kind == Ledger::ACCEPTED }
+      raise KeyError, "ticket #{ticket} の受付記録が無い" if record.nil?
+
+      payload = record.payload
+      Submission.new(ticket: ticket, name: payload['name'].to_sym, focus: payload['focus'],
+                     kit: payload['kit'] && Kit.from_h(payload['kit']), seed: payload['seed'])
+    end
 
     def keep_draining?(done, limit)
       return false if @intake.empty?

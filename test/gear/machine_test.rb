@@ -129,4 +129,58 @@ class GearMachineTest < Minitest::Test
     assert_instance_of Berylx::Err, done.outcome.result
     assert_equal Ledger::COMPLETED, m.state_of(ticket), '拒否ではなく走って Err で閉じた'
   end
+
+  # ---- 落ちても journal から続く ----
+  # 効果を 2 つ踏む program を、拾う 1 手 + 効果 1 つのところで止めてから続ける。
+  # do...end は外側の register( へ結び付くので Task は別メソッドへ出す。
+  def twice_task
+    Berylx::Task[:twice] do |lay, io|
+      once = io.perform(:probe, { 'n' => lay[:n].fetch }).doubled
+      lay.put(:doubled, io.perform(:probe, { 'n' => once }).doubled)
+    end
+  end
+
+  def twice_programs
+    Gear::Program::Registry.new.register(name: :twice, task: twice_task, input: IN, output: OUT)
+  end
+
+  def twice_machine(calls, ledger: Gear::Machine::Ledger.new, intake: Gear::Machine::Intake.new)
+    Gear::Machine.new(programs: twice_programs, ports: ports(calls), ledger: ledger, intake: intake)
+  end
+
+  def twice_kit = Gear::Kit.of(ports: %i[probe program_submit], programs: %i[twice], depth: 1)
+
+  def test_suspended_run_is_recorded_as_suspended_with_a_partial_journal
+    m = twice_machine(calls = [])
+    ticket = m.submit(name: :twice, focus: { 'n' => 2 }, kit: twice_kit).ticket
+    done = m.step(max_effects: 2) # 拾う 1 手 + 効果 1 つで止める
+
+    assert_predicate done, :suspended?
+    assert_equal Ledger::SUSPENDED, m.state_of(ticket)
+    assert_equal [2], calls, '止まるまでに叩いたのは 1 回'
+    assert_equal 1, m.journal_for(ticket).port_results.size, '部分的な記録が残る'
+  end
+
+  def test_resume_does_not_hit_the_outside_again
+    m = twice_machine(first = [])
+    ticket = m.submit(name: :twice, focus: { 'n' => 2 }, kit: twice_kit).ticket
+    m.step(max_effects: 2)
+
+    assert_equal [2], first
+
+    resumed = m.resume(ticket)
+
+    refute_predicate resumed, :suspended?
+    assert_equal Ledger::COMPLETED, m.state_of(ticket)
+    assert_equal [2, 4], first, '記録済みの 1 回は叩き直さず、残りだけ叩く'
+    assert_equal({ 'n' => 2, 'doubled' => 8 }, resumed.produced)
+  end
+
+  def test_resume_without_a_run_is_refused
+    m = twice_machine([])
+    m.submit(name: :twice, focus: { 'n' => 2 }, kit: twice_kit)
+
+    assert_raises(KeyError) { m.resume(1) }  # まだ拾っていない ticket
+    assert_raises(KeyError) { m.resume(99) } # そんな ticket は無い
+  end
 end
